@@ -1,41 +1,53 @@
 module ActiveSupport
-  # This module creates a local registry class inside each thread. It provides
-  # basic methods which will store thread locals in a single class. This
-  # prevents the proliferation of too many thread locals and allows you to
-  # explicitly keep track of each of the variables you're using as thread
-  # locals in a class which includes this module.
+  # This module is used to encapsulate access to thread local variables.
   #
-  # For example, instead of using a bunch of different thread locals to keep
-  # track of some variables like so:
+  # Instead of polluting the thread locals namespace:
   #
-  #   Thread.current[:active_record_connection_handler] = connection_handler
-  #   Thread.current[:active_record_sql_runtime]        = sql_runtime
+  #   Thread.current[:connection_handler]
   #
-  # You could use the following class which implements the +PerThreadRegistry+
-  # module:
+  # you define a class that extends this module:
   #
-  #   class NewRegistry
-  #     extend ActiveSupport::PerThreadRegistry
+  #   module ActiveRecord
+  #     class RuntimeRegistry
+  #       extend ActiveSupport::PerThreadRegistry
   #
-  #     attr_accessor :connection_handler, :sql_runtime
+  #       attr_accessor :connection_handler
+  #     end
   #   end
   #
-  #   NewRegistry.instance.connection_handler = connection_handler
-  #   NewRegistry.instance.sql_runtime        = sql_runtime
+  # and invoke the declared instance accessors as class methods. So
   #
-  # The new way of keeping track of the thread locals will create a new local
-  # inside of +Thread.current+ with a key which is the name of the extended
-  # class. Now you can easily access per thread variables by just calling the
-  # variable name on the registry.
+  #   ActiveRecord::RuntimeRegistry.connection_handler = connection_handler
+  #
+  # sets a connection handler local to the current thread, and
+  #
+  #   ActiveRecord::RuntimeRegistry.connection_handler
+  #
+  # returns a connection handler local to the current thread.
+  #
+  # This feature is accomplished by instantiating the class and storing the
+  # instance as a thread local keyed by the class name. In the example above
+  # a key "ActiveRecord::RuntimeRegistry" is stored in <tt>Thread.current</tt>.
+  # The class methods proxy to said thread local instance.
+  #
+  # If the class has an initializer, it must accept no arguments.
   module PerThreadRegistry
+    def self.extended(object)
+      object.instance_variable_set '@per_thread_registry_key', object.name.freeze
+    end
+
     def instance
-      Thread.current[self.name] ||= new
+      Thread.current[@per_thread_registry_key] ||= new
     end
 
     protected
+      def method_missing(name, *args, &block) # :nodoc:
+        # Caches the method definition as a singleton method of the receiver.
+        define_singleton_method(name) do |*a, &b|
+          instance.public_send(name, *a, &b)
+        end
 
-      def method_missing(*args, &block)
-        instance.public_send(*args, &block)
+        send(name, *args, &block)
       end
   end
 end

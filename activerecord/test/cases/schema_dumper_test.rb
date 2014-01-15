@@ -190,6 +190,8 @@ class SchemaDumperTest < ActiveRecord::TestCase
       assert_equal 'add_index "companies", ["firm_id", "type"], name: "company_partial_index", where: "(rating > 10)", using: :btree', index_definition
     elsif current_adapter?(:MysqlAdapter) || current_adapter?(:Mysql2Adapter)
       assert_equal 'add_index "companies", ["firm_id", "type"], name: "company_partial_index", using: :btree', index_definition
+    elsif current_adapter?(:SQLite3Adapter) && ActiveRecord::Base.connection.supports_partial_index?
+      assert_equal 'add_index "companies", ["firm_id", "type"], name: "company_partial_index", where: "rating > 10"', index_definition
     else
       assert_equal 'add_index "companies", ["firm_id", "type"], name: "company_partial_index"', index_definition
     end
@@ -200,6 +202,11 @@ class SchemaDumperTest < ActiveRecord::TestCase
     match = output.match(%r{create_table "movies"(.*)do})
     assert_not_nil(match, "nonstandardpk table not found")
     assert_match %r(primary_key: "movieid"), match[1], "non-standard primary key not preserved"
+  end
+
+  def test_schema_dump_should_use_false_as_default
+    output = standard_dump
+    assert_match %r{t\.boolean\s+"has_fun",.+default: false}, output
   end
 
   if current_adapter?(:MysqlAdapter, :Mysql2Adapter)
@@ -247,19 +254,20 @@ class SchemaDumperTest < ActiveRecord::TestCase
       assert_match %r{t.integer\s+"bigint_default",\s+limit: 8,\s+default: 0}, output
     end
 
-    def test_schema_dump_includes_extensions
-      connection = ActiveRecord::Base.connection
-      skip unless connection.supports_extensions?
+    if ActiveRecord::Base.connection.supports_extensions?
+      def test_schema_dump_includes_extensions
+        connection = ActiveRecord::Base.connection
 
-      connection.stubs(:extensions).returns(['hstore'])
-      output = standard_dump
-      assert_match "# These are extensions that must be enabled", output
-      assert_match %r{enable_extension "hstore"}, output
+        connection.stubs(:extensions).returns(['hstore'])
+        output = standard_dump
+        assert_match "# These are extensions that must be enabled", output
+        assert_match %r{enable_extension "hstore"}, output
 
-      connection.stubs(:extensions).returns([])
-      output = standard_dump
-      assert_no_match "# These are extensions that must be enabled", output
-      assert_no_match %r{enable_extension}, output
+        connection.stubs(:extensions).returns([])
+        output = standard_dump
+        assert_no_match "# These are extensions that must be enabled", output
+        assert_no_match %r{enable_extension}, output
+      end
     end
 
     def test_schema_dump_includes_xml_shorthand_definition
@@ -299,7 +307,7 @@ class SchemaDumperTest < ActiveRecord::TestCase
 
     def test_schema_dump_includes_uuid_shorthand_definition
       output = standard_dump
-      if %r{create_table "poistgresql_uuids"} =~ output
+      if %r{create_table "postgresql_uuids"} =~ output
         assert_match %r{t.uuid "guid"}, output
       end
     end

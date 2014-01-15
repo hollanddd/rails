@@ -42,7 +42,6 @@ INFO
           logger = ActiveSupport::Logger.new f
           logger.formatter = config.log_formatter
           logger = ActiveSupport::TaggedLogging.new(logger)
-          logger.level = ActiveSupport::Logger.const_get(config.log_level.to_s.upcase)
           logger
         rescue StandardError
           logger = ActiveSupport::TaggedLogging.new(ActiveSupport::Logger.new(STDERR))
@@ -52,6 +51,12 @@ INFO
             "The log level has been raised to WARN and the output directed to STDERR until the problem is fixed."
           )
           logger
+        end
+
+        if ::Logger === Rails.logger
+          Rails.logger.level = ActiveSupport::Logger.const_get(config.log_level.to_s.upcase)
+        else
+          Rails.logger.level = config.log_level
         end
       end
 

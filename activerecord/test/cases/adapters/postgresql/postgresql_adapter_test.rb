@@ -10,6 +10,14 @@ module ActiveRecord
         @connection.exec_query('create table ex(id serial primary key, number integer, data character varying(255))')
       end
 
+      def test_bad_connection
+        assert_raise ActiveRecord::NoDatabaseError do
+          configuration = ActiveRecord::Base.configurations['arunit'].merge(database: 'should_not_exist-cinco-dog-db')
+          connection = ActiveRecord::Base.postgresql_connection(configuration)
+          connection.exec_query('drop table if exists ex')
+        end
+      end
+
       def test_valid_column
         column = @connection.columns('ex').find { |col| col.name == 'id' }
         assert @connection.valid_type?(column.type)
@@ -58,6 +66,18 @@ module ActiveRecord
 
       def test_insert_sql_with_no_space_after_table_name
         id = @connection.insert_sql("insert into ex(number) values(5150)")
+        expect = @connection.query('select max(id) from ex').first.first
+        assert_equal expect, id
+      end
+
+      def test_multiline_insert_sql
+        id = @connection.insert_sql(<<-SQL)
+        insert into ex(
+          number)
+        values(
+          5152
+        )
+        SQL
         expect = @connection.query('select max(id) from ex').first.first
         assert_equal expect, id
       end
@@ -225,38 +245,38 @@ module ActiveRecord
         assert_equal "(number > 100)", index.where
       end
 
-      def test_distinct_zero_orders
-        assert_equal "DISTINCT posts.id",
-          @connection.distinct("posts.id", [])
+      def test_columns_for_distinct_zero_orders
+        assert_equal "posts.id",
+          @connection.columns_for_distinct("posts.id", [])
       end
 
-      def test_distinct_one_order
-        assert_equal "DISTINCT posts.id, posts.created_at AS alias_0",
-          @connection.distinct("posts.id", ["posts.created_at desc"])
+      def test_columns_for_distinct_one_order
+        assert_equal "posts.id, posts.created_at AS alias_0",
+          @connection.columns_for_distinct("posts.id", ["posts.created_at desc"])
       end
 
-      def test_distinct_few_orders
-        assert_equal "DISTINCT posts.id, posts.created_at AS alias_0, posts.position AS alias_1",
-          @connection.distinct("posts.id", ["posts.created_at desc", "posts.position asc"])
+      def test_columns_for_distinct_few_orders
+        assert_equal "posts.id, posts.created_at AS alias_0, posts.position AS alias_1",
+          @connection.columns_for_distinct("posts.id", ["posts.created_at desc", "posts.position asc"])
       end
 
-      def test_distinct_blank_not_nil_orders
-        assert_equal "DISTINCT posts.id, posts.created_at AS alias_0",
-          @connection.distinct("posts.id", ["posts.created_at desc", "", "   "])
+      def test_columns_for_distinct_blank_not_nil_orders
+        assert_equal "posts.id, posts.created_at AS alias_0",
+          @connection.columns_for_distinct("posts.id", ["posts.created_at desc", "", "   "])
       end
 
-      def test_distinct_with_arel_order
+      def test_columns_for_distinct_with_arel_order
         order = Object.new
         def order.to_sql
           "posts.created_at desc"
         end
-        assert_equal "DISTINCT posts.id, posts.created_at AS alias_0",
-          @connection.distinct("posts.id", [order])
+        assert_equal "posts.id, posts.created_at AS alias_0",
+          @connection.columns_for_distinct("posts.id", [order])
       end
 
-      def test_distinct_with_nulls
-        assert_equal "DISTINCT posts.title, posts.updater_id AS alias_0", @connection.distinct("posts.title", ["posts.updater_id desc nulls first"])
-        assert_equal "DISTINCT posts.title, posts.updater_id AS alias_0", @connection.distinct("posts.title", ["posts.updater_id desc nulls last"])
+      def test_columns_for_distinct_with_nulls
+        assert_equal "posts.title, posts.updater_id AS alias_0", @connection.columns_for_distinct("posts.title", ["posts.updater_id desc nulls first"])
+        assert_equal "posts.title, posts.updater_id AS alias_0", @connection.columns_for_distinct("posts.title", ["posts.updater_id desc nulls last"])
       end
 
       def test_raise_error_when_cannot_translate_exception

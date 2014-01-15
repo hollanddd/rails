@@ -1,5 +1,6 @@
 require 'abstract_unit'
 require 'controller/fake_controllers'
+require 'active_support/json/decoding'
 
 class TestCaseTest < ActionController::TestCase
   class TestController < ActionController::Base
@@ -201,11 +202,6 @@ XML
     assert_raise(NoMethodError) { head :test_params, "document body", :id => 10 }
   end
 
-  def test_options
-    options :test_params
-    assert_equal 200, @response.status
-  end
-
   def test_process_without_flash
     process :set_flash
     assert_equal '><', flash['test']
@@ -283,13 +279,6 @@ XML
   def test_process_with_request_uri_with_params
     process :test_uri, "GET", :id => 7
     assert_equal "/test_case_test/test/test_uri/7", @response.body
-  end
-
-  def test_process_with_old_api
-    assert_deprecated do
-      process :test_uri, :id => 7
-      assert_equal "/test_case_test/test/test_uri/7", @response.body
-    end
   end
 
   def test_process_with_request_uri_with_params_with_explicit_uri
@@ -634,7 +623,7 @@ XML
     @request.headers['Referer'] = "http://nohost.com/home"
     @request.headers['Content-Type'] = "application/rss+xml"
     get :test_headers
-    parsed_env = JSON.parse(@response.body)
+    parsed_env = ActiveSupport::JSON.decode(@response.body)
     assert_equal "http://nohost.com/home", parsed_env["HTTP_REFERER"]
     assert_equal "application/rss+xml", parsed_env["CONTENT_TYPE"]
   end
@@ -643,7 +632,7 @@ XML
     @request.headers['HTTP_REFERER'] = "http://example.com/about"
     @request.headers['CONTENT_TYPE'] = "application/json"
     get :test_headers
-    parsed_env = JSON.parse(@response.body)
+    parsed_env = ActiveSupport::JSON.decode(@response.body)
     assert_equal "http://example.com/about", parsed_env["HTTP_REFERER"]
     assert_equal "application/json", parsed_env["CONTENT_TYPE"]
   end

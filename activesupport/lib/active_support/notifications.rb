@@ -143,8 +143,8 @@ module ActiveSupport
   #
   # == Default Queue
   #
-  # Notifications ships with a queue implementation that consumes and publish events
-  # to log subscribers in a thread. You can use any queue implementation you want.
+  # Notifications ships with a queue implementation that consumes and publishes events
+  # to all log subscribers. You can use any queue implementation you want.
   #
   module Notifications
     class << self
@@ -178,7 +178,7 @@ module ActiveSupport
       end
 
       def instrumenter
-        InstrumentationRegistry.instrumenter_for(notifier)
+        InstrumentationRegistry.instance.instrumenter_for(notifier)
       end
     end
 
@@ -192,10 +192,6 @@ module ActiveSupport
     # this class.
     class InstrumentationRegistry # :nodoc:
       extend ActiveSupport::PerThreadRegistry
-
-      class << self
-        delegate :instrumenter_for, to: :instance
-      end
 
       def initialize
         @registry = {}

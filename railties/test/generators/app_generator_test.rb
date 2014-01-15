@@ -4,6 +4,7 @@ require 'generators/shared_generator_tests'
 
 DEFAULT_APP_FILES = %w(
   .gitignore
+  README.rdoc
   Gemfile
   Rakefile
   config.ru
@@ -28,6 +29,7 @@ DEFAULT_APP_FILES = %w(
   lib/tasks
   lib/assets
   log
+  test/test_helper.rb
   test/fixtures
   test/controllers
   test/models
@@ -36,6 +38,8 @@ DEFAULT_APP_FILES = %w(
   test/integration
   vendor
   vendor/assets
+  vendor/assets/stylesheets
+  vendor/assets/javascripts
   tmp/cache
   tmp/cache/assets
 )
@@ -53,9 +57,11 @@ class AppGeneratorTest < Rails::Generators::TestCase
 
   def test_assets
     run_generator
-    assert_file "app/views/layouts/application.html.erb", /stylesheet_link_tag\s+"application"/
-    assert_file "app/views/layouts/application.html.erb", /javascript_include_tag\s+"application"/
-    assert_file "app/assets/stylesheets/application.css"
+
+    assert_file("app/views/layouts/application.html.erb", /stylesheet_link_tag\s+"application", media: "all", "data-turbolinks-track" => true/)
+    assert_file("app/views/layouts/application.html.erb", /javascript_include_tag\s+"application", "data-turbolinks-track" => true/)
+    assert_file("app/assets/stylesheets/application.css")
+    assert_file("app/assets/javascripts/application.js")
   end
 
   def test_invalid_application_name_raises_an_error
@@ -65,7 +71,7 @@ class AppGeneratorTest < Rails::Generators::TestCase
 
   def test_invalid_application_name_is_fixed
     run_generator [File.join(destination_root, "things-43")]
-    assert_file "things-43/config/environment.rb", /Things43::Application\.initialize!/
+    assert_file "things-43/config/environment.rb", /Rails\.application\.initialize!/
     assert_file "things-43/config/application.rb", /^module Things43$/
   end
 
@@ -107,11 +113,14 @@ class AppGeneratorTest < Rails::Generators::TestCase
 
     FileUtils.mv(app_root, app_moved_root)
 
+    # make sure we are in correct dir
+    FileUtils.cd(app_moved_root)
+
     generator = Rails::Generators::AppGenerator.new ["rails"], { with_dispatchers: true },
                                                                destination_root: app_moved_root, shell: @shell
     generator.send(:app_const)
     quietly { generator.send(:create_config_files) }
-    assert_file "myapp_moved/config/environment.rb", /Myapp::Application\.initialize!/
+    assert_file "myapp_moved/config/environment.rb", /Rails\.application\.initialize!/
     assert_file "myapp_moved/config/initializers/session_store.rb", /_myapp_session/
   end
 
@@ -131,7 +140,7 @@ class AppGeneratorTest < Rails::Generators::TestCase
 
   def test_application_names_are_not_singularized
     run_generator [File.join(destination_root, "hats")]
-    assert_file "hats/config/environment.rb", /Hats::Application\.initialize!/
+    assert_file "hats/config/environment.rb", /Rails\.application\.initialize!/
   end
 
   def test_gemfile_has_no_whitespace_errors
@@ -151,6 +160,73 @@ class AppGeneratorTest < Rails::Generators::TestCase
       assert_gem "sqlite3"
     else
       assert_gem "activerecord-jdbcsqlite3-adapter"
+    end
+  end
+
+  def test_arbitrary_code
+    output = Tempfile.open('my_template') do |template|
+      template.puts 'puts "You are using Rails version #{Rails::VERSION::STRING}."'
+      template.close
+      run_generator([destination_root, "-m", template.path])
+    end
+    assert_match 'You are using', output
+  end
+
+  def test_add_gemfile_entry
+    Tempfile.open('my_template') do |template|
+      template.puts 'gemfile_entry "tenderlove"'
+      template.flush
+      template.close
+      run_generator([destination_root, "-n", template.path])
+      assert_file "Gemfile", /tenderlove/
+    end
+  end
+
+  def test_add_skip_entry
+    Tempfile.open 'my_template' do |template|
+      template.puts 'add_gem_entry_filter { |gem| gem.name != "jbuilder" }'
+      template.close
+
+      run_generator([destination_root, "-n", template.path])
+      assert_file "Gemfile" do |contents|
+        assert_no_match 'jbuilder', contents
+      end
+    end
+  end
+
+  def test_remove_gem
+    Tempfile.open 'my_template' do |template|
+      template.puts 'remove_gem "jbuilder"'
+      template.close
+
+      run_generator([destination_root, "-n", template.path])
+      assert_file "Gemfile" do |contents|
+        assert_no_match 'jbuilder', contents
+      end
+    end
+  end
+
+  def test_skip_turbolinks_when_it_is_not_on_gemfile
+    Tempfile.open 'my_template' do |template|
+      template.puts 'add_gem_entry_filter { |gem| gem.name != "turbolinks" }'
+      template.flush
+
+      run_generator([destination_root, "-n", template.path])
+      assert_file "Gemfile" do |contents|
+        assert_no_match 'turbolinks', contents
+      end
+
+      assert_file "app/views/layouts/application.html.erb" do |contents|
+        assert_no_match 'turbolinks', contents
+      end
+
+      assert_file "app/views/layouts/application.html.erb" do |contents|
+        assert_no_match('data-turbolinks-track', contents)
+      end
+
+      assert_file "app/assets/javascripts/application.js" do |contents|
+        assert_no_match 'turbolinks', contents
+      end
     end
   end
 
@@ -183,9 +259,6 @@ class AppGeneratorTest < Rails::Generators::TestCase
     run_generator([destination_root, "-d", "jdbcmysql"])
     assert_file "config/database.yml", /mysql/
     assert_gem "activerecord-jdbcmysql-adapter"
-    # TODO: When the JRuby guys merge jruby-openssl in
-    # jruby this will be removed
-    assert_gem "jruby-openssl" if defined?(JRUBY_VERSION)
   end
 
   def test_config_jdbcsqlite3_database
@@ -224,11 +297,15 @@ class AppGeneratorTest < Rails::Generators::TestCase
     end
   end
 
+  def test_generator_if_skip_action_view_is_given
+    run_generator [destination_root, "--skip-action-view"]
+    assert_file "config/application.rb", /#\s+require\s+["']action_view\/railtie["']/
+  end
+
   def test_generator_if_skip_sprockets_is_given
     run_generator [destination_root, "--skip-sprockets"]
     assert_file "config/application.rb" do |content|
       assert_match(/#\s+require\s+["']sprockets\/railtie["']/, content)
-      assert_match(/config\.assets\.enabled = false/, content)
     end
     assert_file "Gemfile" do |content|
       assert_no_match(/sass-rails/, content)
@@ -251,23 +328,15 @@ class AppGeneratorTest < Rails::Generators::TestCase
     if defined?(JRUBY_VERSION)
       assert_gem "therubyrhino"
     else
-      assert_file "Gemfile", /# gem\s+["']therubyracer["']+, platforms: :ruby$/
+      assert_file "Gemfile", /# gem\s+["']therubyracer["']+, \s+platforms: :ruby$/
     end
   end
 
-  def test_creation_of_a_test_directory
-    run_generator
-    assert_file 'test'
-  end
-
-  def test_creation_of_vendor_assets_javascripts_directory
-    run_generator
-    assert_file "vendor/assets/javascripts"
-  end
-
-  def test_creation_of_vendor_assets_stylesheets_directory
-    run_generator
-    assert_file "vendor/assets/stylesheets"
+  def test_inclusion_of_plateform_dependent_gems
+    run_generator([destination_root])
+    if RUBY_ENGINE == 'rbx'
+      assert_gem 'rubysl'
+    end
   end
 
   def test_jquery_is_the_default_javascript_library
@@ -276,7 +345,7 @@ class AppGeneratorTest < Rails::Generators::TestCase
       assert_match %r{^//= require jquery}, contents
       assert_match %r{^//= require jquery_ujs}, contents
     end
-    assert_file "Gemfile", /^gem 'jquery-rails'/
+    assert_gem "jquery-rails"
   end
 
   def test_other_javascript_libraries
@@ -290,22 +359,40 @@ class AppGeneratorTest < Rails::Generators::TestCase
 
   def test_javascript_is_skipped_if_required
     run_generator [destination_root, "--skip-javascript"]
-    assert_file "app/assets/javascripts/application.js" do |contents|
-      assert_no_match %r{^//=\s+require\s}, contents
+
+    assert_no_file "app/assets/javascripts"
+    assert_no_file "vendor/assets/javascripts"
+
+    assert_file "app/views/layouts/application.html.erb" do |contents|
+      assert_match(/stylesheet_link_tag\s+"application", media: "all" %>/, contents)
+      assert_no_match(/javascript_include_tag\s+"application" \%>/, contents)
     end
+
     assert_file "Gemfile" do |content|
-      assert_match(/coffee-rails/, content)
+      assert_no_match(/coffee-rails/, content)
+      assert_no_match(/jquery-rails/, content)
     end
+  end
+
+  def test_inclusion_of_jbuilder
+    run_generator
+    assert_file "Gemfile", /gem 'jbuilder'/
   end
 
   def test_inclusion_of_debugger
     run_generator
-    assert_file "Gemfile", /# gem 'debugger'/
+    if defined?(JRUBY_VERSION)
+      assert_file "Gemfile" do |content|
+        assert_no_match(/debugger/, content)
+      end
+    else
+      assert_file "Gemfile", /# gem 'debugger'/
+    end
   end
 
-  def test_inclusion_of_lazy_loaded_sdoc
+  def test_inclusion_of_doc
     run_generator
-    assert_file 'Gemfile', /gem 'sdoc', require: false/
+    assert_file 'Gemfile', /gem 'sdoc',\s+'~> 0.4.0',\s+group: :doc/
   end
 
   def test_template_from_dir_pwd
@@ -353,6 +440,46 @@ class AppGeneratorTest < Rails::Generators::TestCase
   def test_pretend_option
     output = run_generator [File.join(destination_root, "myapp"), "--pretend"]
     assert_no_match(/run  bundle install/, output)
+  end
+
+  def test_application_name_with_spaces
+    path = File.join(destination_root, "foo bar".shellescape)
+
+    # This also applies to MySQL apps but not with SQLite
+    run_generator [path, "-d", 'postgresql']
+
+    assert_file "foo bar/config/database.yml", /database: foo_bar_development/
+    assert_file "foo bar/config/initializers/session_store.rb", /key: '_foo_bar/
+  end
+
+  def test_spring
+    run_generator
+    assert_file "Gemfile", /gem 'spring', \s+group: :development/
+  end
+
+  def test_spring_binstubs
+    jruby_skip "spring doesn't run on JRuby"
+    generator.stubs(:bundle_command).with('install')
+    generator.expects(:bundle_command).with('exec spring binstub --all').once
+    quietly { generator.invoke_all }
+  end
+
+  def test_spring_no_fork
+    jruby_skip "spring doesn't run on JRuby"
+    Process.stubs(:respond_to?).with(:fork).returns(false)
+    run_generator
+
+    assert_file "Gemfile" do |content|
+      assert_no_match(/spring/, content)
+    end
+  end
+
+  def test_skip_spring
+    run_generator [destination_root, "--skip-spring"]
+
+    assert_file "Gemfile" do |content|
+      assert_no_match(/spring/, content)
+    end
   end
 
 protected
